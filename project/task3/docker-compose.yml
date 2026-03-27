@@ -1,0 +1,21 @@
+services:
+  spark-master:
+    image: apache/spark:latest
+    container_name: spark-master
+    command: /opt/spark/bin/spark-class org.apache.spark.deploy.master.Master
+    ports:
+      - "8080:8080"
+      - "7077:7077"
+    volumes:
+      - .:/opt/spark/work-dir/task3
+      - ./../task1:/opt/spark/work-dir/task1
+
+  spark-worker:
+    image: apache/spark:latest
+    container_name: spark-worker
+    command: /opt/spark/bin/spark-class org.apache.spark.deploy.worker.Worker spark://spark-master:7077
+    depends_on:
+      - spark-master
+    volumes:
+      - .:/opt/spark/work-dir/task3
+      - ./../task1:/opt/spark/work-dir/task1

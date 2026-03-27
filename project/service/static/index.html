@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Smart Grid Admin Console</title>
+    <style>
+        body { font-family: -apple-system, sans-serif; background: #0f172a; color: #f8fafc; padding: 2rem; }
+        .card { background: #1e293b; padding: 1.5rem; border-radius: 0.75rem; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); margin-bottom: 2rem; }
+        h1 { color: #38bdf8; }
+        h2 { border-bottom: 1px solid #334155; padding-bottom: 0.5rem; color: #94a3b8; }
+        .stats { display: flex; gap: 2rem; }
+        .stat-item { flex: 1; text-align: center; background: #0f172a; padding: 1rem; border-radius: 0.5rem; }
+        .stat-val { display: block; font-size: 2rem; font-weight: bold; color: #38bdf8; }
+        .form-group { margin-bottom: 1rem; }
+        input, select, button { padding: 0.5rem; border-radius: 0.25rem; border: 1px solid #475569; background: #0f172a; color: white; width: 100%; box-sizing: border-box; }
+        button { background: #0284c7; border: none; font-weight: bold; cursor: pointer; margin-top: 0.5rem; }
+        button:hover { background: #0369a1; }
+        #results { margin-top: 1rem; background: #334155; padding: 1rem; border-radius: 0.5rem; display: none; }
+        .log-entry { border-bottom: 1px solid #475569; padding: 0.5rem 0; font-size: 0.875rem; }
+    </style>
+</head>
+<body>
+    <h1>⚡ Smart Grid Admin</h1>
+
+    <div class="card">
+        <h2>📊 Состояние системы</h2>
+        <div class="stats" id="stats-container">
+            <div class="stat-item">SSTables <span class="stat-val" id="stat-sst">0</span></div>
+            <div class="stat-item">MemTable <span class="stat-val" id="stat-mem">0</span></div>
+            <div class="stat-item">Reports <span class="stat-val" id="stat-rep">0</span></div>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>🌡️ Мониторинг датчиков</h2>
+        <table style="width: 100%; border-collapse: collapse; text-align: left;">
+            <thead>
+                <tr style="border-bottom: 1px solid #475569;">
+                    <th style="padding: 0.5rem;">ID Датчика</th>
+                    <th style="padding: 0.5rem;">Статус</th>
+                    <th style="padding: 0.5rem;">Последняя активность</th>
+                </tr>
+            </thead>
+            <tbody id="sensors-table">
+                <!-- Заполняется динамически -->
+            </tbody>
+        </table>
+    </div>
+
+    <div style="display: flex; gap: 2rem;">
+        <div class="card" style="flex: 1;">
+            <h2>📡 Управление датчиками</h2>
+            <div class="form-group">
+                <label>ID Датчика (или 'ALL'):</label>
+                <input type="text" id="target-sensor" placeholder="sensor_1">
+            </div>
+            <div class="form-group">
+                <label>Действие:</label>
+                <select id="action">
+                    <option value="ON">Включить (ON)</option>
+                    <option value="OFF">Выключить (OFF)</option>
+                </select>
+            </div>
+            <button onclick="sendCommand()">Отправить команду</button>
+            <div id="cmd-status" style="margin-top: 1rem; font-style: italic; color: #38bdf8;"></div>
+        </div>
+
+        <div class="card" style="flex: 1;">
+            <h2>🔎 Поиск инцидентов</h2>
+            <div class="form-group">
+                <input type="text" id="search-query" list="keyword-list" placeholder="Выберите или введите слово...">
+                <datalist id="keyword-list"></datalist>
+            </div>
+            <button onclick="searchReports()">Искать</button>
+            <div id="results"></div>
+        </div>
+    </div>
+
+    <script>
+        async function updateStats() {
+            try {
+                const r = await fetch('/stats');
+                const d = await r.json();
+                document.getElementById('stat-sst').innerText = d.sstables_count;
+                document.getElementById('stat-mem').innerText = d.memtable_size;
+                document.getElementById('stat-rep').innerText = d.reports_count;
+            } catch(e) {}
+        }
+
+        async function updateSensors() {
+            try {
+                const r = await fetch('/sensors');
+                const data = await r.json();
+                const table = document.getElementById('sensors-table');
+                table.innerHTML = '';
+                
+                const now = Math.floor(Date.now() / 1000);
+                
+                for (const [id, info] of Object.entries(data)) {
+                    const diff = now - info.last_seen;
+                    const statusColor = info.is_on ? '#4ade80' : '#f87171';
+                    const statusText = info.is_on ? 'ВКЛ (ON)' : 'ВЫКЛ (OFF)';
+                    
+                    table.innerHTML += `
+                        <tr style="border-bottom: 1px solid #334155;">
+                            <td style="padding: 0.5rem;">${id}</td>
+                            <td style="padding: 0.5rem; color: ${statusColor}; font-weight: bold;">${statusText}</td>
+                            <td style="padding: 0.5rem;">${diff}сек. назад</td>
+                        </tr>
+                    `;
+                }
+            } catch(e) {}
+        }
+
+        async function updateKeywords() {
+            try {
+                const r = await fetch('/keywords');
+                const words = await r.json();
+                const list = document.getElementById('keyword-list');
+                list.innerHTML = '';
+                words.sort().forEach(word => {
+                    const opt = document.createElement('option');
+                    opt.value = word;
+                    list.appendChild(opt);
+                });
+            } catch(e) {}
+        }
+
+        async function sendCommand() {
+            const sid = document.getElementById('target-sensor').value;
+            const act = document.getElementById('action').value;
+            const status = document.getElementById('cmd-status');
+            
+            status.innerText = "Отправка...";
+            try {
+                const r = await fetch('/commands', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({target_sensor: sid, action: act})
+                });
+                const d = await r.json();
+                status.innerText = `В лог добавлена команда: ${d.command}`;
+            } catch(e) {
+                status.innerText = "Ошибка отправки";
+            }
+        }
+
+        async function searchReports() {
+            const q = document.getElementById('search-query').value;
+            const resDiv = document.getElementById('results');
+            resDiv.style.display = 'block';
+            resDiv.innerText = "Поиск...";
+            
+            try {
+                const r = await fetch(`/search?q=${q}`);
+                const d = await r.json();
+                if (d.results.length === 0) {
+                    resDiv.innerHTML = "<h3>Ничего не найдено</h3>";
+                } else {
+                    resDiv.innerHTML = `<h3>Найдено: ${d.results.length}</h3>`;
+                    d.results.forEach(res => {
+                        resDiv.innerHTML += `<div class="log-entry"><strong>[ID: ${res.id}]</strong> ${res.content}</div>`;
+                    });
+                }
+            } catch(e) {
+                resDiv.innerText = "Ошибка поиска";
+            }
+        }
+
+        // Автоматически добавляем тестовые отчеты при загрузке (для демо)
+        async function initDemo() {
+            // Очищаем/инициализируем статистику
+            updateStats();
+            updateSensors();
+            updateKeywords();
+        }
+
+        initDemo();
+        setInterval(updateStats, 2000);
+        setInterval(updateSensors, 2000);
+        setInterval(updateKeywords, 5000);
+    </script>
+</body>
+</html>

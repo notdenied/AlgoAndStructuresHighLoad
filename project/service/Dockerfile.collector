@@ -1,0 +1,18 @@
+FROM python:3.10-slim
+
+ENV PYTHONUNBUFFERED=1
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY core.py .
+COPY collector.py .
+COPY static static/
+
+RUN mkdir -p data/lsm_storage
+
+EXPOSE 8000
+
+CMD ["python", "collector.py"]

@@ -1,80 +1,218 @@
 import os
+import json
+import time
+import hashlib
+from collections import defaultdict
 
 
-class MiniLSMTree:
-    def __init__(self, max_memtable_size=5, max_sstable_count=5, data_dir="lsm_data"):
-        """
-        Инициализация структуры LSM-дерева.
-        max_memtable_size - искусственно заниженный лимит ключей 
-        для демонстрации работы flush() (в реальности это мегабайты).
-        """
-        self.max_memtable_size = max_memtable_size
-        self.max_sstable_count = max_sstable_count
+class BloomFilter:
+    def __init__(self, size=1000, hash_count=3):
+        self.size = size
+        self.hash_count = hash_count
+        self.bit_array = 0
 
-        # MemTable: структура данных в оперативной памяти (для поиска O(1) используем словарь)
-        self.memtable = {}
+    def _hashes(self, item):
+        for i in range(self.hash_count):
+            yield int(hashlib.md5(f"{item}-{i}".encode()).hexdigest(), 16) % self.size
 
-        # Список файлов SSTable на диске (от старых к новым)
-        self.sstable_files = []
+    def add(self, item):
+        for h in self._hashes(item):
+            self.bit_array |= (1 << h)
 
-        # Директория для хранения файлов
+    def maybe_contains(self, item):
+        for h in self._hashes(item):
+            if not (self.bit_array & (1 << h)):
+                return False
+        return True
+
+
+class FullLSMTree:
+    def __init__(self, data_dir="lsm_storage", memtable_limit=100, sparse_idx_step=10):
         self.data_dir = data_dir
+        self.memtable_limit = memtable_limit
+        self.sparse_idx_step = sparse_idx_step
+
+        self.memtable = {}
+        self.sstable_metadata = []  # List of dicts: {path, filter, index}
+        self.wal_path = os.path.join(self.data_dir, "wal.log")
+
         if not os.path.exists(self.data_dir):
             os.makedirs(self.data_dir)
 
-        print("LSM-Tree DB инициализирована.")
+        self._load_metadata()
+        self._recover_from_wal()
+        print(f"LSM-Tree initialized in {data_dir}")
+
+    def _load_metadata(self):
+        """Загрузка метаданных для существующих SSTables."""
+        files = sorted([f for f in os.listdir(self.data_dir) if f.endswith(".meta")])
+        for meta_file in files:
+            path = os.path.join(self.data_dir, meta_file)
+            with open(path, 'r') as f:
+                data = json.load(f)
+                bloom = BloomFilter(size=data["bloom_size"], hash_count=data["bloom_hashes"])
+                bloom.bit_array = data["bloom_bits"]
+
+                self.sstable_metadata.append({
+                    "path": data["sstable_path"],
+                    "filter": bloom,
+                    "index": data["sparse_index"]
+                })
+        print(f"Loaded {len(self.sstable_metadata)} SSTables metadata.")
+
+    def _recover_from_wal(self):
+        """Восстановление данных из WAL при запуске."""
+        if not os.path.exists(self.wal_path):
+            return
+
+        print("Recovering from WAL...")
+        with open(self.wal_path, 'r') as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                try:
+                    k, v = json.loads(line)
+                    self.memtable[k] = v
+                except json.JSONDecodeError:
+                    continue
+
+        # Если MemTable после восстановления большой — сбрасываем на диск
+        if len(self.memtable) >= self.memtable_limit:
+            self._flush()
+
+    def _write_to_wal(self, key, value):
+        with open(self.wal_path, 'a') as f:
+            f.write(json.dumps([key, value]) + "\n")
 
     def put(self, key, value):
-        """Запись данных. Происходит мгновенно, так как пишем только в ОЗУ."""
+        self._write_to_wal(key, value)
         self.memtable[key] = value
 
-        print(f"PUT: {key} -> {value} (в MemTable)")
+        if len(self.memtable) >= self.memtable_limit:
+            self._flush()
 
-        if len(self.memtable) > self.max_memtable_size:
-            self.flush()
+    def delete(self, key):
+        """Удаление через Tombstone."""
+        self.put(key, "__DELETED__")
 
-    def flush(self):
-        """Сброс оперативной памяти на диск (создание SSTable)."""
+    def _flush(self):
         if not self.memtable:
             return
 
-        sstable_idx = len(self.sstable_files)
-        filepath = os.path.join(self.data_dir, f"sstable_{str(sstable_idx).zfill(6)}.txt")
+        timestamp = int(time.time() * 1000000) # Use microseconds for better precision
+        filename = f"sstable_{timestamp}.txt"
+        path = os.path.join(self.data_dir, filename)
+        meta_path = path + ".meta"
 
-        sorted_keys = list(sorted(self.memtable.keys()))
+        sorted_keys = sorted(self.memtable.keys())
+        bloom = BloomFilter()
+        sparse_index = {}
 
-        # Записываем отсортированные данные на диск
-        with open(filepath, 'w') as f:
-            for k in sorted_keys:
-                f.write(f"{k},{self.memtable[k]}\n")
+        with open(path, 'w') as f:
+            for i, k in enumerate(sorted_keys):
+                pos = f.tell()
+                v = self.memtable[k]
 
-        self.sstable_files.append(filepath)
-        print(f"\n[FLUSH] MemTable переполнен. Данные сброшены в диск: {filepath}")
+                f.write(f"{k},{v}\n")
+                bloom.add(k)
 
+                if i % self.sparse_idx_step == 0:
+                    sparse_index[k] = pos
+
+        # Сохранение метаданных
+        meta_data = {
+            "sstable_path": path,
+            "bloom_bits": bloom.bit_array,
+            "bloom_size": bloom.size,
+            "bloom_hashes": bloom.hash_count,
+            "sparse_index": sparse_index
+        }
+        with open(meta_path, 'w') as f:
+            json.dump(meta_data, f)
+
+        self.sstable_metadata.append({
+            "path": path,
+            "filter": bloom,
+            "index": sparse_index
+        })
+
+        # Очистка MemTable и WAL
         self.memtable = {}
+        if os.path.exists(self.wal_path):
+            os.remove(self.wal_path)
 
-        if len(self.sstable_files) > self.max_sstable_count:
-            self.compact()
+        print(f"Flushed to {path}")
 
     def get(self, key):
-        """Поиск ключа. Это самое узкое (медленное) место LSM-деревьев."""
-        print(f"\nGET: Поиск ключа '{key}'...")
+        # 1. MemTable
+        if key in self.memtable:
+            val = self.memtable[key]
+            return None if val == "__DELETED__" else val
 
-        value = self.memtable.get(key, None)
-        if value:
-            return value
+        # 2. SSTables (от новых к старым)
+        for meta in reversed(self.sstable_metadata):
+            # Bloom Filter check
+            if not meta["filter"].maybe_contains(key):
+                continue
 
-        for filepath in sorted(next(os.walk(self.data_dir))[-1], reverse=True):
-            with open(f'{self.data_dir}/{filepath}', 'r') as f:
+            # Sparse Index lookup
+            sparse_idx = meta["index"]
+            # Находим ближайший ключ в индексе, который <= искомому
+            candidate_keys = [k for k in sparse_idx.keys() if k <= key]
+            if not candidate_keys:
+                continue
+
+            start_pos = sparse_idx[max(candidate_keys)]
+
+            with open(meta["path"], 'r') as f:
+                f.seek(start_pos)
                 for line in f:
-                    k, v = line.strip().split(',')
-                    if k == str(key):
-                        print(f"Найдено на диске (история): {filepath}")
-                        return v
+                    if not line.strip():
+                        continue
+                    parts = line.strip().split(',', 1)
+                    if len(parts) < 2:
+                        continue
+                    k, v = parts
+                    if k == key:
+                        return None if v == "__DELETED__" else v
+                    if k > key:  # Т.к. файл отсортирован
+                        break
 
-        print("Ключ не найден.")
         return None
 
     def compact(self):
-        # TODO: compaction
-        ...
+        """
+        Простая компакция: объединение всех SSTables в один новый уровень.
+        """
+        self._flush() # Убеждаемся, что всё из памяти сброшено на диск
+        if len(self.sstable_metadata) < 2:
+            return
+
+        print("Starting Compaction...")
+        merged = {}
+        # Читаем от старых к новым, чтобы новые перезаписывали старые
+        for meta in self.sstable_metadata:
+            with open(meta["path"], 'r') as f:
+                for line in f:
+                    parts = line.strip().split(',', 1)
+                    if len(parts) == 2:
+                        k, v = parts
+                        merged[k] = v
+
+        # Удаляем старые файлы и их метаданные
+        for meta in self.sstable_metadata:
+            if os.path.exists(meta["path"]):
+                os.remove(meta["path"])
+            meta_path = meta["path"] + ".meta"
+            if os.path.exists(meta_path):
+                os.remove(meta_path)
+
+        self.sstable_metadata = []
+
+        # Записываем как один новый MemTable (временно) и вызываем flush
+        self.memtable = merged
+        self._flush()
+        print("Compaction complete.")
+
+
+

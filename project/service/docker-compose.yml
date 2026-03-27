@@ -1,0 +1,58 @@
+services:
+  collector:
+    build:
+      context: .
+      dockerfile: Dockerfile.collector
+    container_name: collector
+    ports:
+      - "8000:8000"
+    volumes:
+      - collector_data:/app/data
+    networks:
+      - smartgrid_net
+
+  sensor-1:
+    build:
+      context: .
+      dockerfile: Dockerfile.sensor
+    container_name: sensor-1
+    environment:
+      - SENSOR_ID=sensor_1
+      - COLLECTOR_URL=http://collector:8000
+    depends_on:
+      - collector
+    networks:
+      - smartgrid_net
+
+  sensor-2:
+    build:
+      context: .
+      dockerfile: Dockerfile.sensor
+    container_name: sensor-2
+    environment:
+      - SENSOR_ID=sensor_2
+      - COLLECTOR_URL=http://collector:8000
+    depends_on:
+      - collector
+    networks:
+      - smartgrid_net
+
+  sensor-3:
+    build:
+      context: .
+      dockerfile: Dockerfile.sensor
+    container_name: sensor-3
+    environment:
+      - SENSOR_ID=sensor_3
+      - COLLECTOR_URL=http://collector:8000
+    depends_on:
+      - collector
+    networks:
+      - smartgrid_net
+
+networks:
+  smartgrid_net:
+    driver: bridge
+
+volumes:
+  collector_data:

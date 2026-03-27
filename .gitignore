@@ -1,2 +1,35 @@
-lsm_data
+# Data and Storage
+*.csv
+telemetry.csv
+project/task1/lsm_storage/
+project/task1/test_lsm_full/
+project/task1/test_lsm_data/
+project/task1/lsm_data/
+project/tests/test_lsm_full/
+project/tests/test_commands.log
+project/task2/commands.log
+lsm_storage/
+test_lsm_full/
+test_lsm_data/
+
+# Logs
+*.log
+*.meta
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.ipynb_checkpoints/
+.pytest_cache/
+
+# System / IDE
+.DS_Store
+.vscode/
+.idea/
+
+# Docker
+.docker/
+
 io_benchmark_dummy.dat
+lsm_data

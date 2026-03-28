@@ -38,6 +38,7 @@
                 <tr style="border-bottom: 1px solid #475569;">
                     <th style="padding: 0.5rem;">ID Датчика</th>
                     <th style="padding: 0.5rem;">Статус</th>
+                    <th style="padding: 0.5rem;">Значение</th>
                     <th style="padding: 0.5rem;">Последняя активность</th>
                 </tr>
             </thead>
@@ -105,6 +106,7 @@
                         <tr style="border-bottom: 1px solid #334155;">
                             <td style="padding: 0.5rem;">${id}</td>
                             <td style="padding: 0.5rem; color: ${statusColor}; font-weight: bold;">${statusText}</td>
+                            <td style="padding: 0.5rem;">${info.last_val}</td>
                             <td style="padding: 0.5rem;">${diff}сек. назад</td>
                         </tr>
                     `;

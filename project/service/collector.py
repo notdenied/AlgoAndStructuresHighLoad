@@ -43,17 +43,20 @@ class ReportRequest(BaseModel):
     content: str
 
 
-def update_sensor_status(sensor_id: str, is_on: Optional[bool] = None):
+def update_sensor_status(sensor_id: str, is_on: Optional[bool] = None, last_val: Optional[str] = None):
     if sensor_id not in sensors_status:
-        sensors_status[sensor_id] = {"is_on": True, "last_seen": 0}
+        sensors_status[sensor_id] = {"is_on": True, "last_seen": 0, "last_val": "N/A"}
     sensors_status[sensor_id]["last_seen"] = int(time.time())
     if is_on is not None:
         sensors_status[sensor_id]["is_on"] = is_on
+    if last_val is not None:
+        sensors_status[sensor_id]["last_val"] = last_val
 
 
 @app.post("/telemetry")
 async def post_telemetry(data: TelemetryData):
-    update_sensor_status(data.sensor_id)
+    val_str = f"{data.voltage:.1f}V / {data.current:.1f}A"
+    update_sensor_status(data.sensor_id, last_val=val_str)
     lsm.put(data.sensor_id, f"{data.voltage},{data.current}")
     return {"status": "ok"}
 

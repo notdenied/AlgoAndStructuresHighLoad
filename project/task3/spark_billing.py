@@ -1,3 +1,4 @@
+import os
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, sum as _sum
 
@@ -9,7 +10,17 @@ def main():
         .getOrCreate()
 
     # Путь к файлу внутри Apache Spark контейнера
-    input_file = "/opt/spark/work-dir/task1/telemetry.csv"
+    container_path = "/opt/spark/work-dir/task1/telemetry.csv"
+    # Относительный путь для локального запуска (на хосте)
+    host_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../task1/telemetry.csv"))
+
+    if os.path.exists(container_path):
+        input_file = container_path
+    elif os.path.exists(host_path):
+        input_file = host_path
+    else:
+        # If neither exists locally, fallback to the expected container path or let Spark handle it (perhaps it's a URI)
+        input_file = container_path
 
     print(f"Reading data from {input_file}...")
 

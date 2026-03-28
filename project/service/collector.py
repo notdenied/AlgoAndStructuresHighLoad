@@ -88,6 +88,7 @@ async def poll_commands(sensor_id: str, offset: int = 0):
 async def get_keywords():
     return list(inverted_index.index.keys())
 
+
 @app.get("/sensors")
 async def get_sensors():
     return sensors_status

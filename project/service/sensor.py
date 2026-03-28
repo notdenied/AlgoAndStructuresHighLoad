@@ -7,6 +7,7 @@ import threading
 SENSOR_ID = os.getenv("SENSOR_ID", "sensor_default")
 COLLECTOR_URL = os.getenv("COLLECTOR_URL", "http://collector:8000")
 
+
 class SmartSensor:
     def __init__(self, sensor_id, collector_url):
         self.sensor_id = sensor_id
@@ -39,7 +40,7 @@ class SmartSensor:
                     data = resp.json()
                     commands = data.get("commands", [])
                     self.offset = data.get("next_offset", self.offset)
-                    
+
                     for cmd_entry in commands:
                         cmd_str = cmd_entry.get("command", "")
                         if ":" in cmd_str:
@@ -86,6 +87,7 @@ class SmartSensor:
         t1.join()
         t2.join()
         t3.join()
+
 
 if __name__ == "__main__":
     sensor = SmartSensor(SENSOR_ID, COLLECTOR_URL)

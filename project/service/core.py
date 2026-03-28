@@ -5,6 +5,7 @@ import hashlib
 import re
 from collections import defaultdict
 
+
 class BloomFilter:
     def __init__(self, size=1000, hash_count=3):
         self.size = size
@@ -25,6 +26,7 @@ class BloomFilter:
                 return False
         return True
 
+
 class FullLSMTree:
     def __init__(self, data_dir="data/lsm_storage", memtable_limit=100, sparse_idx_step=10):
         self.data_dir = data_dir
@@ -33,7 +35,8 @@ class FullLSMTree:
         self.memtable = {}
         self.sstable_metadata = []
         self.wal_path = os.path.join(self.data_dir, "wal.log")
-        if not os.path.exists(self.data_dir): os.makedirs(self.data_dir)
+        if not os.path.exists(self.data_dir):
+            os.makedirs(self.data_dir)
         self._load_metadata()
         self._recover_from_wal()
 
@@ -48,45 +51,56 @@ class FullLSMTree:
                 self.sstable_metadata.append({"path": data["sstable_path"], "filter": bloom, "index": data["sparse_index"]})
 
     def _recover_from_wal(self):
-        if not os.path.exists(self.wal_path): return
+        if not os.path.exists(self.wal_path):
+            return
         with open(self.wal_path, 'r') as f:
             for line in f:
                 try:
                     k, v = json.loads(line)
                     self.memtable[k] = v
-                except: continue
-        if len(self.memtable) >= self.memtable_limit: self._flush()
+                except:
+                    continue
+        if len(self.memtable) >= self.memtable_limit:
+            self._flush()
 
     def _write_to_wal(self, key, value):
-        with open(self.wal_path, 'a') as f: f.write(json.dumps([key, value]) + "\n")
+        with open(self.wal_path, 'a') as f:
+            f.write(json.dumps([key, value]) + "\n")
 
     def put(self, key, value):
         self._write_to_wal(key, value)
         self.memtable[key] = value
-        if len(self.memtable) >= self.memtable_limit: self._flush()
+        if len(self.memtable) >= self.memtable_limit:
+            self._flush()
 
     def get(self, key):
         if key in self.memtable:
             val = self.memtable[key]
             return None if val == "__DELETED__" else val
         for meta in reversed(self.sstable_metadata):
-            if not meta["filter"].maybe_contains(key): continue
+            if not meta["filter"].maybe_contains(key):
+                continue
             sparse_idx = meta["index"]
             candidate_keys = [k for k in sparse_idx.keys() if k <= key]
-            if not candidate_keys: continue
+            if not candidate_keys:
+                continue
             start_pos = sparse_idx[max(candidate_keys)]
             with open(meta["path"], 'r') as f:
                 f.seek(start_pos)
                 for line in f:
                     parts = line.strip().split(',', 1)
-                    if len(parts) < 2: continue
+                    if len(parts) < 2:
+                        continue
                     k, v = parts
-                    if k == key: return None if v == "__DELETED__" else v
-                    if k > key: break
+                    if k == key:
+                        return None if v == "__DELETED__" else v
+                    if k > key:
+                        break
         return None
 
     def _flush(self):
-        if not self.memtable: return
+        if not self.memtable:
+            return
         timestamp = int(time.time() * 1000000)
         filename = f"sstable_{timestamp}.txt"
         path = os.path.join(self.data_dir, filename)
@@ -97,12 +111,17 @@ class FullLSMTree:
                 pos = f.tell()
                 f.write(f"{k},{self.memtable[k]}\n")
                 bloom.add(k)
-                if i % self.sparse_idx_step == 0: sparse_index[k] = pos
-        meta_data = {"sstable_path": path, "bloom_bits": bloom.bit_array, "bloom_size": bloom.size, "bloom_hashes": bloom.hash_count, "sparse_index": sparse_index}
-        with open(path + ".meta", 'w') as f: json.dump(meta_data, f)
+                if i % self.sparse_idx_step == 0:
+                    sparse_index[k] = pos
+        meta_data = {"sstable_path": path, "bloom_bits": bloom.bit_array, "bloom_size": bloom.size,
+                     "bloom_hashes": bloom.hash_count, "sparse_index": sparse_index}
+        with open(path + ".meta", 'w') as f:
+            json.dump(meta_data, f)
         self.sstable_metadata.append({"path": path, "filter": bloom, "index": sparse_index})
         self.memtable = {}
-        if os.path.exists(self.wal_path): os.remove(self.wal_path)
+        if os.path.exists(self.wal_path):
+            os.remove(self.wal_path)
+
 
 class AppendOnlyLog:
     def __init__(self, log_file="data/commands.log"):
@@ -113,7 +132,8 @@ class AppendOnlyLog:
             f.write(json.dumps({"timestamp": int(time.time()), "command": command}) + "\n")
 
     def read_from(self, offset=0):
-        if not os.path.exists(self.log_file): return [], 0
+        if not os.path.exists(self.log_file):
+            return [], 0
         commands, current_offset = [], 0
         with open(self.log_file, "r") as f:
             for i, line in enumerate(f):
@@ -121,6 +141,7 @@ class AppendOnlyLog:
                     commands.append(json.loads(line))
                 current_offset = i + 1
         return commands, current_offset
+
 
 class InvertedIndex:
     def __init__(self):
